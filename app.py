@@ -3,7 +3,6 @@ import streamlit as st
 
 API_URL = "https://stock-api-syp8.onrender.com"
 
-# Paths to try, in order. The first one that doesn't return 404 is used.
 CANDIDATE_PATHS = ["/predict/live", "/predict", "/live", "/predict_live"]
 
 st.title("Stock Next-Close Predictor")
@@ -13,17 +12,17 @@ symbol = st.text_input("Stock symbol", "TSLA").strip().upper()
 
 def call_api(path):
     return requests.get(
-        f"{API_URL}{path}",
+        API_URL + path,
         params={"symbol": symbol},
         timeout=90,
     )
 
 
 if st.button("Predict next close"):
+    r = None
+    used_path = None
     try:
-        with st.spinner("Fetching prediction (the first request can take up to a minute)..."):
-            r = None
-            used_path = None
+        with st.spinner("Fetching prediction..."):
             for path in CANDIDATE_PATHS:
                 r = call_api(path)
                 if r.status_code != 404:
@@ -31,23 +30,31 @@ if st.button("Predict next close"):
                     break
 
         if used_path is None:
-            st.error(
-                "None of the guessed endpoints exist. Open "
-                f"{API_URL}/docs in your browser, find the prediction route, "
-                "and put its path in CANDIDATE_PATHS."
-            )
+            st.error("No matching endpoint found.")
+            st.write("Open " + API_URL + "/docs and find the prediction path.")
         elif r.status_code == 429:
-            st.error("Rate limit reached. Please try again later.")
+            st.error("Rate limit reached. Try again later.")
         else:
             r.raise_for_status()
             data = r.json()
-            st.caption(f"Endpoint used: {used_path}")
+            st.caption("Endpoint used: " + used_path)
 
             if "predicted_next_close" in data:
-                st.metric("Predicted next close", f"${data['predicted_next_close']:.2f}")
+                value = data["predicted_next_close"]
+                st.metric("Predicted next close", round(value, 2))
             else:
-                st.warning("The response has a different format than expected:")
+                st.warning("Unexpected response format:")
                 st.json(data)
 
     except requests.exceptions.Timeout:
-        st.error("The API took too long to respond. Try again in
+        st.error("The API took too long to respond.")
+    except requests.exceptions.HTTPError as e:
+        st.error("API returned an error: " + str(e))
+        try:
+            st.json(r.json())
+        except Exception:
+            pass
+    except requests.exceptions.RequestException as e:
+        st.error("Could not reach the API: " + str(e))
+    except ValueError:
+        st.error("The API did not return valid JSON.")
